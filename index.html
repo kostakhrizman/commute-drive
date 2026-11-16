@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0d0f12">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<title>Commute Drive 3D</title>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; overscroll-behavior: none; background: #0d0f12; color: #fff;
+    font-family: Impact, Haettenschweiler, "Arial Narrow Bold", "Segoe UI", sans-serif; }
+  #view { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #view.retro { image-rendering: pixelated; }
+  .ol { text-shadow: 2px 2px 0 #000, -2px 2px 0 #000, 2px -2px 0 #000, -2px -2px 0 #000, 0 3px 0 #000; letter-spacing: 1px; }
+  #hud { position: absolute; top: 18px; right: 22px; text-align: right; display: none; }
+  #time { font-size: 40px; color: #f3d77a; }
+  #speed { font-size: 54px; line-height: 1; }
+  #speed small { font-size: 20px; margin-left: 6px; color: #cfd6dd; }
+  #left { font-size: 24px; color: #9fd6ff; margin-top: 4px; }
+  #cp { font-size: 20px; color: #cfd6dd; }
+  #msg { position: absolute; bottom: 9%; left: 50%; transform: translateX(-50%); font-size: 30px; color: #f3d77a;
+    text-align: center; max-width: 80vw; display: none; }
+  #map { position: absolute; left: 22px; bottom: 22px; width: 200px; height: 200px; border-radius: 50%;
+    border: 4px solid #000; box-shadow: 0 0 0 2px #8d939a; background: #1b2026; display: none; }
+  #keys { position: absolute; left: 22px; top: 18px; font: 13px/1.6 system-ui, sans-serif; color: #e8edf2;
+    background: rgba(0,0,0,.45); padding: 8px 12px; border-radius: 8px; display: none; }
+  #setup, #done { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 10;
+    background: linear-gradient(#1a2430, #0d0f12); }
+  #done { display: none; background: rgba(0,0,0,.55); }
+  .card { width: min(470px, 92vw); padding: 26px 28px; background: rgba(12,16,22,.9); border: 1px solid #39424d;
+    border-radius: 12px; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  h1 { margin: 0 0 6px; font: 34px Impact, Haettenschweiler, sans-serif; letter-spacing: 1px; color: #f3d77a; }
+  p { margin: 6px 0 12px; font-size: 14px; line-height: 1.45; color: #c5ced8; }
+  label { display: block; font-size: 13px; color: #c5ced8; margin: 12px 0 4px; }
+  input[type=text] { width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 8px; font-size: 15px;
+    border: 1px solid #4a5563; background: #1a2029; color: #fff; }
+  .chk { display: flex; gap: 8px; align-items: center; margin-top: 12px; font-size: 13px; color: #c5ced8; }
+  button { margin-top: 16px; width: 100%; padding: 12px; border: 0; border-radius: 8px; font-size: 17px; font-weight: 700;
+    background: #f3d77a; color: #1b1608; cursor: pointer; }
+  button:disabled { opacity: .55; cursor: default; }
+  #err { color: #ff9a8f; font-size: 13px; margin-top: 12px; white-space: pre-wrap; min-height: 1em; }
+  #stage { color: #9fd6ff; font-size: 13px; margin-top: 10px; min-height: 1em; }
+  #bigtime { font: 60px Impact, sans-serif; color: #fff; margin: 6px 0; }
+  .credit { position: absolute; right: 8px; bottom: 4px; font: 11px system-ui, sans-serif; color: #dfe5ea; opacity: .75;
+    text-shadow: 0 0 3px #000; }
+  #touch { display: none; }
+  .tb { position: absolute; width: 84px; height: 84px; border-radius: 50%; border: 3px solid rgba(255,255,255,.75);
+    background: rgba(0,0,0,.35); color: #fff; font: 700 30px system-ui, sans-serif; display: flex; align-items: center;
+    justify-content: center; margin: 0; padding: 0; touch-action: none; }
+  .tb.on { background: rgba(243,215,122,.6); }
+  .tb.sm { width: 56px; height: 56px; font-size: 16px; }
+  body.touch #keys { display: none !important; }
+  body.touch #map { top: 12px; left: 12px; bottom: auto; width: 120px; height: 120px; }
+  body.touch #msg { bottom: auto; top: 24%; font-size: 22px; }
+  body.touch #hud { top: 8px; right: 12px; } body.touch #time { font-size: 26px; } body.touch #speed { font-size: 36px; }
+  body.touch #left { font-size: 16px; } body.touch #cp { font-size: 13px; } body.touch .credit { display: none; }
+  @media (orientation: portrait) { body.touch #rot { display: flex; } }
+  #rot { display: none; position: absolute; inset: 0; z-index: 20; background: #0d0f12; align-items: center; justify-content: center;
+    font: 22px system-ui, sans-serif; text-align: center; padding: 30px; }
+</style>
+</head>
+<body>
+<canvas id="view" class="retro"></canvas>
+<div id="hud">
+  <div id="time" class="ol">0:00.0</div>
+  <div id="speed" class="ol">0<small>KM/H</small></div>
+  <div id="left" class="ol"></div>
+  <div id="cp" class="ol"></div>
+</div>
+<div id="msg" class="ol"></div>
+<div id="keys">W / ↑ gas · S / ↓ brake, reverse · A D / ← → steer<br>Space handbrake · R back to route · C camera · P sharp/retro · M sound</div>
+<canvas id="map" width="400" height="400"></canvas>
+<div id="touch">
+  <button class="tb" data-k="ArrowLeft" style="left:18px;bottom:22px">◀</button>
+  <button class="tb" data-k="ArrowRight" style="left:118px;bottom:22px">▶</button>
+  <button class="tb" data-k="ArrowDown" style="right:118px;bottom:22px;font-size:15px">BRAKE</button>
+  <button class="tb" data-k="ArrowUp" style="right:18px;bottom:22px;font-size:18px">GAS</button>
+  <button class="tb sm" data-k="KeyR" style="right:32px;bottom:124px">ROUTE</button>
+  <button class="tb sm" data-k="KeyC" style="right:132px;bottom:124px">CAM</button>
+</div>
+<div id="rot">Turn your phone sideways to drive</div>
+<div class="credit">Map data © OpenStreetMap contributors · Terrain: Mapzen / AWS Terrain Tiles</div>
+
+<div id="setup">
+  <form class="card" id="form">
+    <h1>COMMUTE DRIVE 3D</h1>
+    <p>Your real route, rebuilt as a low-poly game world from open map data. No account or key needed. The first load downloads the map and can take up to a minute; after that it starts from a saved copy in this browser.</p>
+    <label for="home">Home</label>
+    <input id="home" type="text" placeholder="Place name, address, or lat, lon" required>
+    <label for="work">Work</label>
+    <input id="work" type="text" placeholder="Place name, address, or lat, lon" required>
+    <label class="chk"><input id="fresh" type="checkbox"> Download the map again (use after changing addresses doesn't help)</label>
+    <button id="go" type="submit">Start driving</button>
+    <div id="stage"></div>
+    <div id="err"></div>
+  </form>
+</div>
+<div id="done">
+  <div class="card" style="text-align:center">
+    <h1>MADE IT TO WORK!</h1>
+    <div id="bigtime">0:00.0</div>
+    <p id="best"></p>
+    <button id="again" type="button">Drive again</button>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const store = {
+  get(k) { try { return localStorage.getItem("cd_" + k) || ""; } catch (e) { return ""; } },
+  set(k, v) { try { localStorage.setItem("cd_" + k, v); } catch (e) {} }
+};
+for (const k of ["home", "work"]) $(k).value = store.get(k);
+
+const RE = 6371000, D2R = Math.PI / 180;
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v)), lerp = (a, b, t) => a + (b - a) * t;
+function rng(seed) { return () => { seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+  t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function hash2(i, j) { let h = Math.imul(i, 374761393) + Math.imul(j, 668265263) | 0; h = Math.imul(h ^ h >>> 13, 1274126177);
+  return ((h ^ h >>> 16) >>> 0) / 4294967296; }
+function vnoise(x, z) { const i = Math.floor(x), j = Math.floor(z), u = x - i, v = z - j, s = t => t * t * (3 - 2 * t);
+  return lerp(lerp(hash2(i, j), hash2(i + 1, j), s(u)), lerp(hash2(i, j + 1), hash2(i + 1, j + 1), s(u)), s(v)); }
+const stage = t => { $("stage").textContent = t; return new Promise(r => setTimeout(r, 30)); };
+
+/* ================= saved copy of the map (IndexedDB) ================= */
+function idb() { return new Promise((res, rej) => { const r = indexedDB.open("commute-drive-3d", 1);
+  r.onupgradeneeded = () => r.result.createObjectStore("w"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+async function cacheGet(k) { try { const db = await idb(); return await new Promise(res => { const q = db.transaction("w").objectStore("w").get(k);
+  q.onsuccess = () => res(q.result); q.onerror = () => res(null); }); } catch (e) { return null; } }
+async function cacheSet(k, v) { try { const db = await idb(); await new Promise(res => { const t = db.transaction("w", "readwrite");
+  t.objectStore("w").put(v, k); t.oncomplete = res; t.onerror = res; t.onabort = res; }); } catch (e) {} }
+
+/* ================= downloads ================= */
+async function jget(url, opt) { const r = await fetch(url, opt); if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); }
+async function geocode(q) {
+  const m = q.match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
+  if (m) return { lat: +m[1], lon: +m[2] };
+  let d;
+  try { d = await jget("https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&accept-language=en&q=" + encodeURIComponent(q)); }
+  catch (e) { throw new Error("The address search service did not answer (" + e.message + "). Try again in a minute."); }
+  if (!d.length) throw new Error('Could not find "' + q + '". Try a simpler name, or paste coordinates like 31.817, 35.110.');
+  return { lat: +d[0].lat, lon: +d[0].lon };
+}
+async function getRoute(a, b) {
+  let d;
+  try { d = await jget(`https://router.project-osrm.org/route/v1/driving/${a.lon},${a.lat};${b.lon},${b.lat}?overview=full&geometries=geojson`); }
+  catch (e) { throw new Error("The routing service did not answer (" + e.message + "). Try again in a minute."); }
+  if (d.code !== "Ok" || !d.routes || !d.routes.length) throw new Error("No driving route found between those two places.");
+  return d.routes[0].geometry.coordinates;
+}
+function osmQuery(coords) {
+  // boxes of about 550 m along the route, merged into runs, so the map server can answer from its index
+  const cells = new Map(), LA = 0.005, LO = 0.006;
+  for (const c of coords) for (const dy of [-0.0028, 0, 0.0028]) for (const dx of [-0.0033, 0, 0.0033]) {
+    const j = Math.floor((c[1] + dy) / LA), i = Math.floor((c[0] + dx) / LO); let s = cells.get(j); if (!s) cells.set(j, s = new Set()); s.add(i); }
+  const hw = '[highway~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|service)(_link)?$"]'; let body = "";
+  for (const [j, s] of cells) { const a = [...s].sort((x, y) => x - y);
+    for (let k = 0; k < a.length;) { let e = k; while (e + 1 < a.length && a[e + 1] === a[e] + 1) e++;
+      const bb = `(${(j * LA).toFixed(4)},${(a[k] * LO).toFixed(4)},${((j + 1) * LA).toFixed(4)},${((a[e] + 1) * LO).toFixed(4)})`;
+      body += `way${hw}${bb};way[building]${bb};`; k = e + 1; } }
+  return `[out:json][timeout:90];(${body});out geom qt;`;
+}
+async function getOSM(coords) {
+  const q = osmQuery(coords);
+  const ask = async ep => { const c = new AbortController(), t = setTimeout(() => c.abort(), 100000);
+    try { const d = await jget(ep, { method: "POST", body: "data=" + encodeURIComponent(q), headers: { "Content-Type": "application/x-www-form-urlencoded" }, signal: c.signal });
+      if (!d.elements || !d.elements.length) throw new Error("empty answer"); return d.elements; } finally { clearTimeout(t); } };
+  let els;
+  try { els = await Promise.any(["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter", "https://overpass.private.coffee/api/interpreter"].map(ask)); }
+  catch (e) { throw new Error("The map data service is busy or not answering (" + ((e.errors || [e]).map(x => x.message).join("; ")) + "). Wait a minute and try again."); }
+  return els.filter(e => e.type === "way" && e.geometry && e.tags).map(e => {
+    const g = new Float64Array(e.geometry.length * 2);
+    e.geometry.forEach((p, i) => { g[2 * i] = p.lat; g[2 * i + 1] = p.lon; });
+    return { t: e.tags, g };
+  });
+}
+const ZT = 13, lon2t = lon => (lon + 180) / 360 * (1 << ZT),
+  lat2t = lat => (1 - Math.asinh(Math.tan(lat * D2R)) / Math.PI) / 2 * (1 << ZT);
+function loadTile(x, y) { return new Promise((res, rej) => {
+  const im = new Image(); im.crossOrigin = "anonymous";
+  im.onload = () => { try {
+    const c = document.createElement("canvas"); c.width = c.height = 256;
+    const g = c.getContext("2d", { willReadFrequently: true }); g.drawImage(im, 0, 0);
+    const d = g.getImageData(0, 0, 256, 256).data, f = new Float32Array(65536);
+    for (let i = 0; i < 65536; i++) f[i] = d[i * 4] * 256 + d[i * 4 + 1] + d[i * 4 + 2] / 256 - 32768;
+    res(f); } catch (e) { rej(e); } };
+  im.onerror = () => rej(new Error("tile")); im.src = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${ZT}/${x}/${y}.png`; }); }
+async function getTiles(coords) {
+  let a = 1e9, b = -1e9, c = 1e9, d = -1e9;
+  for (const p of coords) { a = Math.min(a, p[0]); b = Math.max(b, p[0]); c = Math.min(c, p[1]); d = Math.max(d, p[1]); }
+  const m = 0.012, tiles = {}, jobs = [];
+  for (let x = Math.floor(lon2t(a - m)); x <= Math.floor(lon2t(b + m)); x++)
+    for (let y = Math.floor(lat2t(d + m)); y <= Math.floor(lat2t(c - m)); y++)
+      jobs.push(loadTile(x, y).then(f => { tiles[x + "/" + y] = f; }, () => {}));
+  await Promise.all(jobs);
+  return tiles;
+}
+
+/* ================= world ================= */
+let W = null;      // everything about the built world
+const CLS = { motorway: 5, trunk: 5, primary: 4, secondary: 3, tertiary: 2, unclassified: 1, residential: 1, living_street: 1, service: 0 };
+
+function resample(P, step) {
+  const X = [P[0]], Z = [P[1]], S = [0]; let s = 0;
+  for (let i = 1; i < P.length / 2; i++) {
+    const ax = P[2 * i - 2], az = P[2 * i - 1], bx = P[2 * i], bz = P[2 * i + 1], d = Math.hypot(bx - ax, bz - az);
+    if (d < 0.05) continue;
+    const k = Math.ceil(d / step);
+    for (let j = 1; j <= k; j++) { X.push(ax + (bx - ax) * j / k); Z.push(az + (bz - az) * j / k); S.push(s + d * j / k); }
+    s += d;
+  }
+  return { X, Z, S, L: s };
+}
+class GB {   // tiny geometry builder
+  constructor() { this.p = []; this.u = []; this.c = []; this.i = []; this.n = 0; }
+  v(x, y, z, u, v, r, g, b) { this.p.push(x, y, z); this.u.push(u, v); this.c.push(r, g, b); return this.n++; }
+  tri(a, b, c) { this.i.push(a, b, c); }
+  quad(a, b, c, d) { this.i.push(a, b, c, a, c, d); }
+  mesh(mat) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(this.p, 3));
+    g.setAttribute("uv", new THREE.Float32BufferAttribute(this.u, 2));
+    g.setAttribute("color", new THREE.Float32BufferAttribute(this.c, 3));
+    g.setIndex(this.n > 65535 ? new THREE.Uint32BufferAttribute(this.i, 1) : this.i);
+    g.computeVertexNormals();
+    const m = new THREE.Mesh(g, mat); m.frustumCulled = false; return m;
+  }
+}
+function tex(w, h, draw) {
+  const c = document.createElement("canvas"); c.width = w; c.height = h; draw(c.getContext("2d"), w, h);
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.magFilter = THREE.NearestFilter;
+  t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t;
+}
+function speckle(g, w, h, base, spread, seed) {
+  const r = rng(seed), im = g.createImageData(w, h);
+  for (let i = 0; i < w * h; i++) { const k = 1 - spread * r();
+    im.data[4 * i] = base[0] * k; im.data[4 * i + 1] = base[1] * k; im.data[4 * i + 2] = base[2] * k; im.data[4 * i + 3] = 255; }
+  g.putImageData(im, 0, 0);
+}
+function roadTex(key) {
+  return tex(64, 128, (g, w, h) => {
+    speckle(g, w, h, [92, 92, 96], 0.22, 7);
+    if (key === "p") return;
+    const n = +key[0], two = key[1] === "t";
+    g.fillStyle = "#d8b83a"; g.fillRect(2, 0, 2, h); g.fillRect(w - 4, 0, 2, h);
+    g.fillStyle = "#e6e6e0";
+    for (let k = 1; k < n; k++) { const x = Math.round(w * k / n) - 1;
+      if (two && k * 2 === n) g.fillRect(x, 0, 2, h); else g.fillRect(x, 0, 2, 44); }
+  });
+}
+
+async function buildWorld(data) {
+  const T = THREE, route = data.route;
+  /* ---- local metres: x east, z south ---- */
+  let la = 0, lo = 0; for (const p of route) { lo += p[0]; la += p[1]; }
+  const oLat = la / route.length, oLon = lo / route.length, cosO = Math.cos(oLat * D2R);
+  const toX = lon => (lon - oLon) * D2R * cosO * RE, toZ = lat => -(lat - oLat) * D2R * RE;
+
+  /* ---- raw heights from the downloaded tiles ---- */
+  const tiles = data.tiles || {}, hasElev = Object.keys(tiles).length > 0; let lastH = 0;
+  const px = (ix, iy) => { const t = tiles[(ix >> 8) + "/" + (iy >> 8)]; if (!t) return lastH; return lastH = t[(iy & 255) * 256 + (ix & 255)]; };
+  const rawH = (x, z) => {
+    if (!hasElev) return 0;
+    const fx = lon2t(oLon + x / (D2R * cosO * RE)) * 256 - 0.5, fy = lat2t(oLat - z / (D2R * RE)) * 256 - 0.5;
+    const ix = Math.floor(fx), iy = Math.floor(fy), u = fx - ix, v = fy - iy;
+    return lerp(lerp(px(ix, iy), px(ix + 1, iy), u), lerp(px(ix, iy + 1), px(ix + 1, iy + 1), u), v);
+  };
+
+  /* ---- route in metres, resampled every 8 m ---- */
+  const rp = new Float32Array(route.length * 2); route.forEach((p, i) => { rp[2 * i] = toX(p[0]); rp[2 * i + 1] = toZ(p[1]); });
+  const rs = resample(rp, 8), RX = rs.X, RZ = rs.Z, RN = RX.length;
+  if (RN < 5) throw new Error("The route is too short to drive.");
+
+  /* ---- height grid ---- */
+  let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;
+  for (let i = 0; i < RN; i++) { x0 = Math.min(x0, RX[i]); x1 = Math.max(x1, RX[i]); z0 = Math.min(z0, RZ[i]); z1 = Math.max(z1, RZ[i]); }
+  x0 -= 700; x1 += 700; z0 -= 700; z1 += 700;
+  let G = 25; while (((x1 - x0) / G + 2) * ((z1 - z0) / G + 2) > 420000) G += 5;
+  const nx = Math.ceil((x1 - x0) / G) + 1, nz = Math.ceil((z1 - z0) / G) + 1;
+  const H = new Float32Array(nx * nz);
+  for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) H[i + j * nx] = rawH(x0 + i * G, z0 + j * G);
+  const H0 = H.slice();
+  const gridAt = (A, x, z) => {
+    const fx = clamp((x - x0) / G, 0, nx - 1.001), fz = clamp((z - z0) / G, 0, nz - 1.001);
+    const i = Math.floor(fx), j = Math.floor(fz), u = fx - i, v = fz - j, k = i + j * nx;
+    return u + v <= 1 ? A[k] + u * (A[k + 1] - A[k]) + v * (A[k + nx] - A[k])
+                      : A[k + nx + 1] + (1 - u) * (A[k + nx] - A[k + nx + 1]) + (1 - v) * (A[k + 1] - A[k + nx + 1]);
+  };
+  const terrainAt = (x, z) => gridAt(H, x, z);
+  const carveAt = (x, z) => gridAt(H0, x, z) - gridAt(H, x, z);
+
+  /* ---- sort the map data into roads and buildings ---- */
+  await stage("Laying out roads…");
+  const roads = [], blds = [];
+  for (const e of data.ways) {
+    const t = e.t, g = e.g, n = g.length / 2; if (n < 2) continue;
+    const P = new Float32Array(n * 2); for (let i = 0; i < n; i++) { P[2 * i] = toX(g[2 * i + 1]); P[2 * i + 1] = toZ(g[2 * i]); }
+    if (t.building) { if (n >= 4 && n < 300) blds.push({ P: P.subarray(0, (n - 1) * 2), t }); continue; }
+    if (!t.highway || t.area === "yes") continue;
+    const link = t.highway.endsWith("_link"), base = link ? t.highway.slice(0, -5) : t.highway, rank = CLS[base] ?? 1;
+    const oneway = t.oneway === "yes" || base === "motorway" || link || t.junction === "roundabout";
+    const lanes = clamp(parseInt(t.lanes) || (link || rank === 0 ? 1 : 2), 1, 4);
+    let w = rank === 0 ? 4 : lanes * (rank >= 4 ? 3.6 : rank >= 2 ? 3.3 : 3) + (rank >= 4 ? 2.4 : 1); if (link) w = Math.max(w, 5.5);
+    roads.push({ P, rank, w, hw: w / 2, tex: rank === 0 ? "p" : lanes + (oneway ? "o" : "t"),
+      bridge: !!t.bridge && t.bridge !== "no", tunnel: !!t.tunnel && t.tunnel !== "no" && t.tunnel !== "building_passage",
+      k0: g[0] + "," + g[1], k1: g[2 * n - 2] + "," + g[2 * n - 1], rs: resample(P, 6) });
+  }
+  // bridges and tunnels: straight-line height between the points where they meet the ground
+  const solve = (list, hfn) => {
+    const nodes = new Map(), N = k => { let o = nodes.get(k); if (!o) { o = { cnt: 0, h: 0, nb: [] }; nodes.set(k, o); } return o; };
+    for (const r of list) { const a = N(r.k0), b = N(r.k1), L = Math.max(r.rs.L, 1), m = r.rs.X.length - 1;
+      a.cnt++; b.cnt++; a.nb.push([b, L]); b.nb.push([a, L]); a.x = r.rs.X[0]; a.z = r.rs.Z[0]; b.x = r.rs.X[m]; b.z = r.rs.Z[m]; r.na = a; r.nb = b; }
+    for (const o of nodes.values()) o.h = hfn(o.x, o.z);
+    for (let it = 0; it < 600; it++) for (const o of nodes.values()) { if (o.cnt === 1) continue;
+      let sw = 0, sh = 0; for (const [q, L] of o.nb) { sw += 1 / L; sh += q.h / L; } o.h = sh / sw; }
+    for (const r of list) r.prof = r.rs.S.map(s => lerp(r.na.h, r.nb.h, s / Math.max(r.rs.L, 1e-3)));
+  };
+  solve(roads.filter(r => r.tunnel), terrainAt);
+  for (const r of roads) if (!r.tunnel && !r.bridge) {
+    const raw = r.rs.X.map((x, i) => terrainAt(x, r.rs.Z[i])), n = raw.length;
+    r.prof = raw.map((_, i) => { let s = 0, c = 0; for (let k = Math.max(0, i - 5); k <= Math.min(n - 1, i + 5); k++) { s += raw[k]; c++; } return s / c; });
+  }
+  /* ---- level the ground under roads; cut a trench for tunnels ---- */
+  const sw = new Float32Array(nx * nz), sh = new Float32Array(nx * nz), mw = new Float32Array(nx * nz);
+  for (const r of roads) { if (r.bridge) continue;
+    const full = r.hw + (r.tunnel ? 1.45 * G : 12), fall = r.tunnel ? 25 : 30, mul = (r.rank + 1) * (r.tunnel ? 60 : 1), R = full + fall;
+    for (let q = 0; q < r.rs.X.length; q++) { const x = r.rs.X[q], z = r.rs.Z[q], ph = r.prof[q];
+      const i0 = Math.max(0, Math.ceil((x - R - x0) / G)), i1 = Math.min(nx - 1, Math.floor((x + R - x0) / G));
+      const j0 = Math.max(0, Math.ceil((z - R - z0) / G)), j1 = Math.min(nz - 1, Math.floor((z + R - z0) / G));
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+        const d = Math.hypot(x0 + i * G - x, z0 + j * G - z); if (d >= R) continue;
+        let wgt = d < full ? 1 : 1 - (d - full) / fall; wgt = wgt * wgt * (3 - 2 * wgt);
+        const k = i + j * nx; sw[k] += wgt * mul; sh[k] += wgt * mul * ph; if (wgt > mw[k]) mw[k] = wgt; } } }
+  for (let k = 0; k < H.length; k++) if (sw[k] > 0) H[k] = lerp(H[k], sh[k] / sw[k], mw[k]);
+  solve(roads.filter(r => r.bridge), terrainAt);
+
+  /* ---- lookup tables ---- */
+  const HC = 60, hkey = (x, z) => Math.floor(x / HC) * 100003 + Math.floor(z / HC);
+  const put = (map, o, ax, az, bx, bz, pad) => {
+    for (let i = Math.floor((Math.min(ax, bx) - pad) / HC); i <= Math.floor((Math.max(ax, bx) + pad) / HC); i++)
+      for (let j = Math.floor((Math.min(az, bz) - pad) / HC); j <= Math.floor((Math.max(az, bz) + pad) / HC); j++) {
+        const k = i * 100003 + j; let a = map.get(k); if (!a) map.set(k, a = []); a.push(o); } };
+  const segH = new Map(), strH = new Map(), bldH = new Map();
+  for (const r of roads) {
+    for (let i = 1; i < r.P.length / 2; i++) { const s = [r.P[2 * i - 2], r.P[2 * i - 1], r.P[2 * i], r.P[2 * i + 1], r.hw, r.rank];
+      put(segH, s, s[0], s[1], s[2], s[3], 0); }
+    if (r.bridge || r.tunnel) for (let i = 1; i < r.rs.X.length; i++) {
+      const s = { ax: r.rs.X[i - 1], az: r.rs.Z[i - 1], ah: r.prof[i - 1], bx: r.rs.X[i], bz: r.rs.Z[i], bh: r.prof[i], hw: r.hw, tunnel: r.tunnel };
+      put(strH, s, s.ax, s.az, s.bx, s.bz, r.hw + 3); }
+  }
+  const proj = (s, x, z) => { const dx = s.bx - s.ax, dz = s.bz - s.az, l2 = dx * dx + dz * dz || 1;
+    const t = ((x - s.ax) * dx + (z - s.az) * dz) / l2, l = Math.sqrt(l2); return [t, ((x - s.ax) * dz - (z - s.az) * dx) / l, dx / l, dz / l]; };
+  // driving surface: the ground, or a bridge deck if that is the level the car is already on
+  const surfaceAt = (x, z, cur) => {
+    const t = terrainAt(x, z), cell = strH.get(hkey(x, z)); if (!cell || cur == null) return t;
+    let best = t, bd = Math.abs(cur - t);
+    for (const s of cell) { if (s.tunnel) continue; const [u, d] = proj(s, x, z); if (u < -0.05 || u > 1.05 || Math.abs(d) > s.hw + 1.2) continue;
+      const bh = lerp(s.ah, s.bh, clamp(u, 0, 1)); if (bh < t) continue; if (Math.abs(cur - bh) < bd) { bd = Math.abs(cur - bh); best = bh; } }
+    return best;
+  };
+  const roadDist = (x, z) => { let m = 1e9; const ci = Math.floor(x / HC), cj = Math.floor(z / HC);
+    for (let i = ci - 1; i <= ci + 1; i++) for (let j = cj - 1; j <= cj + 1; j++) { const a = segH.get(i * 100003 + j); if (!a) continue;
+      for (const s of a) { const dx = s[2] - s[0], dz = s[3] - s[1], t = clamp(((x - s[0]) * dx + (z - s[1]) * dz) / (dx * dx + dz * dz || 1), 0, 1);
+        const d = Math.hypot(x - s[0] - dx * t, z - s[1] - dz * t) - s[4]; if (d < m) m = d; } }
+    return m; };
+
+  /* ---- scene ---- */
+  await stage("Building the world…");
+  const scene = new T.Scene(), FOG = 0xd8c7a6; scene.background = new T.Color(FOG); scene.fog = new T.Fog(FOG, 250, 1900);
+  scene.add(new T.HemisphereLight(0xdfe9ff, 0x7a6a48, 1.25));
+  const sun = new T.DirectionalLight(0xfff1d6, 1.6); sun.position.set(-0.55, 0.75, 0.35); scene.add(sun);
+  const sky = new T.Mesh(new T.SphereGeometry(3000, 16, 8), new T.MeshBasicMaterial({ vertexColors: true, side: T.BackSide, fog: false, depthWrite: false }));
+  { const p = sky.geometry.attributes.position, c = [], a = new T.Color(FOG), b = new T.Color(0x4f86c6), o = new T.Color();
+    for (let i = 0; i < p.count; i++) { o.copy(a).lerp(b, clamp(p.getY(i) / 1400, 0, 1)); c.push(o.r, o.g, o.b); }
+    sky.geometry.setAttribute("color", new T.Float32BufferAttribute(c, 3)); sky.renderOrder = -1; scene.add(sky); }
+
+  // buildings: lookup for collisions, and how built-up each 100 m block is
+  const UC = 100, unx = Math.ceil((x1 - x0) / UC) + 1, urban = new Uint8Array(unx * (Math.ceil((z1 - z0) / UC) + 1));
+  const ukey = (x, z) => clamp(Math.floor((x - x0) / UC), 0, unx - 1) + Math.max(0, Math.floor((z - z0) / UC)) * unx;
+  const OC = 8, onx = Math.ceil((x1 - x0) / OC) + 1, onz = Math.ceil((z1 - z0) / OC) + 1, occ = new Uint8Array(onx * onz);
+  const mark = (ax, az, bx, bz) => { for (let j = Math.max(0, Math.floor((az - z0) / OC)); j <= Math.min(onz - 1, Math.floor((bz - z0) / OC)); j++)
+    for (let i = Math.max(0, Math.floor((ax - x0) / OC)); i <= Math.min(onx - 1, Math.floor((bx - x0) / OC)); i++) occ[i + j * onx] = 1; };
+  for (const r of roads) for (let i = 0; i < r.rs.X.length; i++) mark(r.rs.X[i] - r.hw - 3, r.rs.Z[i] - r.hw - 3, r.rs.X[i] + r.hw + 3, r.rs.Z[i] + r.hw + 3);
+  for (const b of blds) { let ax = 1e9, bx = -1e9, az = 1e9, bz = -1e9;
+    for (let i = 0; i < b.P.length; i += 2) { ax = Math.min(ax, b.P[i]); bx = Math.max(bx, b.P[i]); az = Math.min(az, b.P[i + 1]); bz = Math.max(bz, b.P[i + 1]); }
+    b.box = [ax, az, bx, bz]; b.cx = (ax + bx) / 2; b.cz = (az + bz) / 2;
+    b.skip = carveAt(b.cx, b.cz) > 4 || roadDist(b.cx, b.cz) < 0; if (b.skip) continue;
+    mark(ax - 2, az - 2, bx + 2, bz + 2); urban[ukey(b.cx, b.cz)] = Math.min(255, urban[ukey(b.cx, b.cz)] + 1); put(bldH, b, ax, az, bx, bz, 0); }
+  const inBuilding = (x, z) => { const a = bldH.get(hkey(x, z)); if (!a) return false;
+    for (const b of a) { if (x < b.box[0] || x > b.box[2] || z < b.box[1] || z > b.box[3]) continue; const P = b.P; let ins = false;
+      for (let i = 0, j = P.length - 2; i < P.length; j = i, i += 2)
+        if ((P[i + 1] > z) !== (P[j + 1] > z) && x < (P[j] - P[i]) * (z - P[i + 1]) / (P[j + 1] - P[i + 1]) + P[i]) ins = !ins;
+      if (ins) return true; }
+    return false; };
+
+  // terrain
+  { const pos = new Float32Array(nx * nz * 3), col = new Float32Array(nx * nz * 3), uv = new Float32Array(nx * nz * 2), idx = new Uint32Array((nx - 1) * (nz - 1) * 6);
+    for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) { const k = i + j * nx, x = x0 + i * G, z = z0 + j * G;
+      pos[3 * k] = x; pos[3 * k + 1] = H[k]; pos[3 * k + 2] = z; uv[2 * k] = x / 7; uv[2 * k + 1] = z / 7;
+      const sl = clamp((Math.abs(H[Math.min(k + 1, H.length - 1)] - H[k]) + Math.abs(H[Math.min(k + nx, H.length - 1)] - H[k])) / G, 0, 1);
+      const n = vnoise(x / 180, z / 180), rock = clamp(sl * 1.6 + n * 0.5 - 0.25, 0, 1), u = clamp(urban[ukey(x, z)] / 5, 0, 1) * 0.8;
+      let r = lerp(0.40, 0.66, rock), g = lerp(0.50, 0.58, rock), b = lerp(0.26, 0.42, rock);
+      col[3 * k] = lerp(r, 0.70, u); col[3 * k + 1] = lerp(g, 0.66, u); col[3 * k + 2] = lerp(b, 0.58, u); }
+    let q = 0; for (let j = 0; j < nz - 1; j++) for (let i = 0; i < nx - 1; i++) { const k = i + j * nx;
+      idx[q++] = k; idx[q++] = k + nx; idx[q++] = k + 1; idx[q++] = k + 1; idx[q++] = k + nx; idx[q++] = k + nx + 1; }
+    const g = new T.BufferGeometry(); g.setAttribute("position", new T.BufferAttribute(pos, 3)); g.setAttribute("color", new T.BufferAttribute(col, 3));
+    g.setAttribute("uv", new T.BufferAttribute(uv, 2)); g.setIndex(new T.BufferAttribute(idx, 1)); g.computeVertexNormals();
+    const m = new T.Mesh(g, new T.MeshLambertMaterial({ vertexColors: true, map: tex(64, 64, (c, w, h) => speckle(c, w, h, [255, 255, 255], 0.3, 3)) }));
+    m.frustumCulled = false; scene.add(m); }
+
+  // roads
+  const rgb = {}, capGB = new GB(), brGB = new GB(), tubeGB = new GB(), roofGB = new GB();
+  for (const r of roads) {
+    const { X, Z, S } = r.rs, n = X.length, gb = rgb[r.tex] || (rgb[r.tex] = new GB()), off = 0.1 + r.rank * 0.03, str = r.bridge || r.tunnel; let prev = -1;
+    for (let i = 0; i < n; i++) {
+      const a = Math.max(0, i - 1), b = Math.min(n - 1, i + 1), l = Math.hypot(X[b] - X[a], Z[b] - Z[a]) || 1, px = -(Z[b] - Z[a]) / l, pz = (X[b] - X[a]) / l;
+      if (!str && carveAt(X[i], Z[i]) > 5) { prev = -1; continue; }
+      const lx = X[i] + px * r.hw, lz = Z[i] + pz * r.hw, rx = X[i] - px * r.hw, rz = Z[i] - pz * r.hw, v = S[i] / 12;
+      const yb = r.bridge ? Math.max(r.prof[i], terrainAt(X[i], Z[i])) + off : 0;
+      const cur = gb.v(lx, r.bridge ? yb : terrainAt(lx, lz) + off, lz, 0, v, 1, 1, 1);
+      gb.v(X[i], r.bridge ? yb : terrainAt(X[i], Z[i]) + off, Z[i], 0.5, v, 1, 1, 1);
+      gb.v(rx, r.bridge ? yb : terrainAt(rx, rz) + off, rz, 1, v, 1, 1, 1);
+      let bc, tc;
+      if (r.bridge) { const e = r.hw + 0.3;          // deck underside, sides and low barrier
+        bc = brGB.v(X[i] + px * e, yb + 0.7, Z[i] + pz * e, 0, 0, .62, .61, .58); brGB.v(X[i] + px * e, yb - 1.1, Z[i] + pz * e, 0, 0, .5, .5, .48);
+        brGB.v(X[i] - px * e, yb - 1.1, Z[i] - pz * e, 0, 0, .5, .5, .48); brGB.v(X[i] - px * e, yb + 0.7, Z[i] - pz * e, 0, 0, .62, .61, .58); }
+      if (r.tunnel) { const e = r.hw + 1.2, y = terrainAt(X[i], Z[i]), u = S[i] / 10;
+        tc = tubeGB.v(X[i] + px * e, y - 0.5, Z[i] + pz * e, u, 0, 1, 1, 1); tubeGB.v(X[i] + px * e, y + 5.6, Z[i] + pz * e, u, 0.45, 1, 1, 1);
+        tubeGB.v(X[i], y + 5.6, Z[i], u, 1, 1, 1, 1); tubeGB.v(X[i] - px * e, y + 5.6, Z[i] - pz * e, u, 0.45, 1, 1, 1); tubeGB.v(X[i] - px * e, y - 0.5, Z[i] - pz * e, u, 0, 1, 1, 1); }
+      if (prev >= 0) { gb.quad(prev, cur, cur + 1, prev + 1); gb.quad(prev + 1, cur + 1, cur + 2, prev + 2);
+        if (r.bridge) for (let k = 0; k < 3; k++) brGB.quad(r._b + k, bc + k, bc + k + 1, r._b + k + 1);
+        if (r.tunnel) for (let k = 0; k < 4; k++) tubeGB.quad(r._t + k, tc + k, tc + k + 1, r._t + k + 1); }
+      prev = cur; r._b = bc; r._t = tc;
+    }
+    for (const i of [0, n - 1]) { if (!str && carveAt(X[i], Z[i]) > 5) continue;           // round patch where roads meet
+      const yc = (r.bridge ? Math.max(r.prof[i], terrainAt(X[i], Z[i])) : terrainAt(X[i], Z[i])) + off - 0.03, c = capGB.v(X[i], yc, Z[i], X[i] / 8, Z[i] / 12, 1, 1, 1);
+      for (let k = 0; k <= 10; k++) { const a = k / 10 * Math.PI * 2, x = X[i] + Math.cos(a) * r.hw, z = Z[i] + Math.sin(a) * r.hw;
+        capGB.v(x, r.bridge ? yc : terrainAt(x, z) + off - 0.03, z, x / 8, z / 12, 1, 1, 1); if (k) capGB.tri(c, c + k, c + k + 1); } }
+  }
+  const roadMat = k => new T.MeshBasicMaterial({ map: roadTex(k), side: T.DoubleSide, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -6 });
+  scene.add(capGB.mesh(roadMat("p")));
+  for (const k in rgb) scene.add(rgb[k].mesh(roadMat(k)));
+  if (brGB.n) scene.add(brGB.mesh(new T.MeshLambertMaterial({ vertexColors: true, side: T.DoubleSide })));
+  if (tubeGB.n) scene.add(tubeGB.mesh(new T.MeshBasicMaterial({ side: T.DoubleSide, map: tex(64, 64, (g, w, h) => {
+    speckle(g, w, h, [150, 148, 140], 0.15, 5); g.fillStyle = "#55544f"; g.fillRect(0, 0, w, 36); g.fillStyle = "#77756e"; g.fillRect(0, 34, w, 2);
+    g.fillStyle = "#3b3b39"; g.fillRect(0, 0, w, 12); g.fillStyle = "#fff3c2"; g.fillRect(8, 2, 26, 5); }) })));
+
+  // buildings
+  await stage("Putting up buildings…");
+  const wallGB = new GB();
+  for (const b of blds) { if (b.skip) continue; const P = b.P, n = P.length / 2, rnd = rng(Math.floor(P[0] * 31 + P[1] * 17));
+    let lo = 1e9, hi = -1e9; for (let i = 0; i < n; i++) { const h = terrainAt(P[2 * i], P[2 * i + 1]); lo = Math.min(lo, h); hi = Math.max(hi, h); }
+    const big = (b.box[2] - b.box[0]) * (b.box[3] - b.box[1]) > 500;
+    const ht = parseFloat(b.t.height) || (parseInt(b.t["building:levels"]) * 3.2) || (big ? 9.6 + Math.floor(rnd() * 4) * 3.2 : 6.4 + Math.floor(rnd() * 3) * 3.2);
+    const top = hi + clamp(ht, 3, 90), base = lo - 3, k = 0.86 + rnd() * 0.14, cr = k, cg = k * (0.93 + rnd() * 0.05), cb = k * (0.8 + rnd() * 0.1); let u = 0;
+    for (let i = 0; i < n; i++) { const j = (i + 1) % n, ax = P[2 * i], az = P[2 * i + 1], bx = P[2 * j], bz = P[2 * j + 1], u2 = u + Math.hypot(bx - ax, bz - az) / 4;
+      const a = wallGB.v(ax, base, az, u, (base - top) / 3.2, cr, cg, cb); wallGB.v(bx, base, bz, u2, (base - top) / 3.2, cr, cg, cb);
+      wallGB.v(bx, top, bz, u2, 0, cr, cg, cb); wallGB.v(ax, top, az, u, 0, cr, cg, cb); wallGB.quad(a, a + 1, a + 2, a + 3); u = u2; }
+    const pts = []; for (let i = 0; i < n; i++) pts.push(new T.Vector2(P[2 * i], P[2 * i + 1]));
+    const g = 0.5 + rnd() * 0.2, s = roofGB.n; for (const p of pts) roofGB.v(p.x, top, p.y, 0, 0, g, g * 0.97, g * 0.92);
+    for (const f of T.ShapeUtils.triangulateShape(pts, [])) roofGB.tri(s + f[0], s + f[1], s + f[2]); }
+  if (wallGB.n) { scene.add(wallGB.mesh(new T.MeshLambertMaterial({ vertexColors: true, side: T.DoubleSide, map: tex(64, 64, (g, w, h) => {
+      speckle(g, w, h, [226, 212, 180], 0.1, 11); g.fillStyle = "rgba(120,104,78,.35)";
+      for (let y = 0; y < h; y += 8) { g.fillRect(0, y, w, 1); for (let x = (y / 8 % 2) * 8; x < w; x += 16) g.fillRect(x, y, 1, 8); }
+      g.fillStyle = "#6f6654"; g.fillRect(17, 15, 30, 32); g.fillStyle = "#2b3a4a"; g.fillRect(19, 17, 26, 28);
+      g.fillStyle = "#4d6379"; g.fillRect(19, 17, 26, 9); g.fillStyle = "#6f6654"; g.fillRect(31, 17, 2, 28); }) })));
+    scene.add(roofGB.mesh(new T.MeshLambertMaterial({ vertexColors: true, side: T.DoubleSide }))); }
+
+  // trees
+  { const tg = new GB(), cone = (y0, y1, r, c) => { for (let k = 0; k < 6; k++) { const a = k / 6 * 6.2832, b = (k + 1) / 6 * 6.2832, i = tg.n;
+      tg.v(Math.cos(a) * r, y0, Math.sin(a) * r, 0, 0, ...c); tg.v(Math.cos(b) * r, y0, Math.sin(b) * r, 0, 0, ...c); tg.v(0, y1, 0, 0, 0, c[0] * 1.15, c[1] * 1.15, c[2] * 1.15); tg.tri(i, i + 2, i + 1); } };
+    cone(0, 2.6, 0.28, [.36, .26, .16]); cone(1.2, 5.2, 1.9, [.16, .34, .16]); cone(3.2, 7.6, 1.35, [.19, .40, .19]);
+    const geo = tg.mesh(null).geometry.toNonIndexed(); geo.computeVertexNormals();
+    const MAX = 9000, im = new T.InstancedMesh(geo, new T.MeshLambertMaterial({ vertexColors: true, side: T.DoubleSide }), MAX), rnd = rng(42), M = new T.Matrix4(), Q = new T.Quaternion(), up = new T.Vector3(0, 1, 0);
+    let c = 0; for (let tries = 0; tries < 70000 && c < MAX; tries++) { const i = Math.floor(rnd() * RN), a = rnd() * 6.2832, d = 12 + Math.pow(rnd(), 1.7) * 650, x = RX[i] + Math.cos(a) * d, z = RZ[i] + Math.sin(a) * d;
+      if (x < x0 + 5 || x > x1 - 5 || z < z0 + 5 || z > z1 - 5 || occ[Math.floor((x - x0) / OC) + Math.floor((z - z0) / OC) * onx]) continue;
+      if (vnoise(x / 70, z / 70) < 0.42 || (urban[ukey(x, z)] > 2 && rnd() > 0.12) || carveAt(x, z) > 3) continue;
+      const s = 0.7 + rnd() * 0.9; M.compose(new T.Vector3(x, terrainAt(x, z) - 0.2, z), Q.setFromAxisAngle(up, rnd() * 6.28), new T.Vector3(s, s * (0.9 + rnd() * 0.5), s)); im.setMatrixAt(c++, M); }
+    im.count = c; im.frustumCulled = false; scene.add(im); }
+
+  /* ---- the route: heights, guide strip, checkpoints ---- */
+  const RH = new Float32Array(RN); let ph = null;
+  for (let i = 0; i < RN; i++) { ph = surfaceAt(RX[i], RZ[i], ph == null ? terrainAt(RX[i], RZ[i]) : ph); RH[i] = ph; }
+  { const gb = new GB(); let prev = -1; for (let i = 0; i < RN; i++) { const a = Math.max(0, i - 1), b = Math.min(RN - 1, i + 1), l = Math.hypot(RX[b] - RX[a], RZ[b] - RZ[a]) || 1, px = -(RZ[b] - RZ[a]) / l * 0.45, pz = (RX[b] - RX[a]) / l * 0.45;
+      const c = gb.v(RX[i] + px, RH[i] + 0.3, RZ[i] + pz, 0, 0, 1, 1, 1); gb.v(RX[i] - px, RH[i] + 0.3, RZ[i] - pz, 0, 0, 1, 1, 1); if (prev >= 0) gb.quad(prev, c, c + 1, prev + 1); prev = c; }
+    scene.add(gb.mesh(new T.MeshBasicMaterial({ color: 0xff4fd8, transparent: true, opacity: 0.6, side: T.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -12 }))); }
+  const cps = []; for (let i = 125; i < RN - 60; i += 125) cps.push(i); cps.push(RN - 1);
+  const beam = new T.Mesh(new T.CylinderGeometry(3.5, 3.5, 80, 12, 1, true), new T.MeshBasicMaterial({ color: 0xffd23f, transparent: true, opacity: 0.45, side: T.DoubleSide, depthWrite: false, fog: false }));
+  scene.add(beam);
+
+  /* ---- the car ---- */
+  const car = new T.Group(), paint = new T.MeshLambertMaterial({ color: 0xc8281e }), dark = new T.MeshLambertMaterial({ color: 0x1c232b }), tyre = new T.MeshLambertMaterial({ color: 0x151515 });
+  const ext = (pts, w, mat) => { const s = new T.Shape(pts.map(p => new T.Vector2(p[0], p[1]))), g = new T.ExtrudeGeometry(s, { depth: w, bevelEnabled: false });
+    g.translate(0, 0, -w / 2); g.rotateY(Math.PI / 2); const m = new T.Mesh(g, mat); car.add(m); return m; };
+  ext([[-2.2, .3], [-2.2, .88], [-1.5, .96], [1.0, .93], [2.15, .74], [2.2, .3]], 1.76, paint);
+  ext([[-1.5, .95], [-1.05, 1.43], [.25, 1.43], [.98, .93]], 1.52, dark);
+  const box = (w, h, l, x, y, z, mat) => { const m = new T.Mesh(new T.BoxGeometry(w, h, l), mat); m.position.set(x, y, z); car.add(m); return m; };
+  box(1.5, .06, 1.34, 0, 1.45, .4, paint);
+  for (const x of [-.6, .6]) { box(.42, .14, .06, x, .72, -2.2, new T.MeshBasicMaterial({ color: 0xfff4c0 })); box(.42, .14, .06, x, .78, 2.2, new T.MeshBasicMaterial({ color: 0xe01818 })); }
+  box(1.8, .16, .1, 0, .36, -2.2, dark); box(1.8, .16, .1, 0, .36, 2.2, dark);
+  const wheels = [], steerers = [];
+  for (const z of [-1.35, 1.35]) for (const x of [-.82, .82]) { const piv = new T.Group(); piv.position.set(x, .34, z); const g = new T.CylinderGeometry(.34, .34, .26, 10); g.rotateZ(Math.PI / 2);
+    const m = new T.Mesh(g, tyre); const hub = new T.Mesh(new T.BoxGeometry(.28, .3, .3), new T.MeshLambertMaterial({ color: 0x9a9a9a })); m.add(hub); piv.add(m); car.add(piv); wheels.push(m); if (z < 0) steerers.push(piv); }
+  const shadow = new T.Mesh(new T.PlaneGeometry(2.3, 4.9), new T.MeshBasicMaterial({ color: 0, transparent: true, opacity: 0.35, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -8, polygonOffsetUnits: -16 }));
+  shadow.rotation.x = -Math.PI / 2; shadow.position.y = 0.06; car.add(shadow); car.rotation.order = "YXZ"; scene.add(car);
+
+  W = { scene, sky, car, wheels, steerers, beam, RX, RZ, RH, RN, cps, terrainAt, surfaceAt, roadDist, inBuilding, segH, strH, proj, hkey, HC, hasElev,
+    stats: { roads: roads.length, buildings: blds.filter(b => !b.skip).length, tunnels: roads.filter(r => r.tunnel).length, bridges: roads.filter(r => r.bridge).length } };
+}
+
+/* ================= game ================= */
+let renderer, camera, retro = true, lastT = 0, dead = false, frameN = 0;
+const S = { x: 0, z: 0, h: 0, heading: 0, v: 0, steer: 0, pitch: 0, roll: 0, spin: 0 };
+const game = { idx: 0, cp: 0, started: false, finished: false, t: 0, snap: 0, camH: 0, hood: false, off: false };
+const keys = {};
+window.__g = { S, game, get W() { return W; } };
+
+function routeHeading(i) { const a = clamp(i, 0, W.RN - 2); return Math.atan2(W.RX[a + 1] - W.RX[a], -(W.RZ[a + 1] - W.RZ[a])); }
+function placeOnRoute(i) { S.x = W.RX[i]; S.z = W.RZ[i]; S.h = W.RH[i]; S.heading = routeHeading(i); S.v = 0; S.steer = 0; game.idx = i; game.snap = 0.5; game.camH = S.heading; }
+function resetRun() { game.cp = 0; game.started = false; game.finished = false; game.t = 0; placeOnRoute(0); $("done").style.display = "none"; }
+function showMsg(t) { const m = $("msg"); if (m.textContent !== t) m.textContent = t; m.style.display = t ? "block" : "none"; }
+const fmt = t => { const m = Math.floor(t / 60); return m + ":" + (t - m * 60).toFixed(1).padStart(4, "0"); };
+function resize() { if (!renderer) return; const w = innerWidth, h = innerHeight, s = retro ? Math.min(1, 560 / h) : Math.min(devicePixelRatio || 1, 2);
+  renderer.setSize(Math.round(w * s), Math.round(h * s), false); camera.aspect = w / h; camera.updateProjectionMatrix(); $("view").classList.toggle("retro", retro); }
+
+let actx, osc, gain, muted = false;
+function initAudio() { if (actx) return; try { actx = new (window.AudioContext || window.webkitAudioContext)(); osc = actx.createOscillator(); osc.type = "sawtooth";
+  const f = actx.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 420; gain = actx.createGain(); gain.gain.value = 0.035; osc.connect(f); f.connect(gain); gain.connect(actx.destination); osc.start(); } catch (e) {} }
+
+function update(dt) {
+  const sin = Math.sin(S.heading), cos = Math.cos(S.heading), av = Math.abs(S.v);
+  if (!game.finished) {
+    const gas = keys.KeyW || keys.ArrowUp, brake = keys.KeyS || keys.ArrowDown, left = keys.KeyA || keys.ArrowLeft, right = keys.KeyD || keys.ArrowRight;
+    if (gas) S.v += (S.v < 0 ? 16 : 9 * (1 - S.v / 52) + 0.8) * dt;
+    if (brake) S.v -= (S.v > 0 ? 18 : 6) * dt;
+    if (keys.Space) S.v -= Math.sign(S.v) * Math.min(av, 24 * dt);
+    S.v -= S.v * (0.1 + 0.003 * av) * dt;
+    game.off = W.roadDist(S.x, S.z) > 2.5;
+    if (game.off && av > 9) S.v -= Math.sign(S.v) * 13 * dt;
+    if (!gas && !brake && av < 0.3) S.v = 0;
+    S.v = clamp(S.v, -10, 50);
+    const target = ((right ? 1 : 0) - (left ? 1 : 0)) * 0.55 / (1 + av * 0.15);
+    S.steer += clamp(target - S.steer, -2.4 * dt, 2.4 * dt);
+    S.heading += S.v * Math.tan(S.steer) / 2.7 * dt;
+    let nx = S.x + sin * S.v * dt, nz = S.z - cos * S.v * dt;
+    const cell = W.strH.get(W.hkey(nx, nz));            // tunnel walls
+    if (cell) for (const s of cell) { if (!s.tunnel) continue; const [u, d, tx, tz] = W.proj(s, nx, nz), lim = s.hw - 0.4;
+      if (u >= 0 && u <= 1 && Math.abs(d) > lim && Math.abs(d) < s.hw + 2.5) { const push = d - Math.sign(d) * lim; nx -= tz * push; nz += tx * push; S.v *= 1 - 1.5 * dt; } }
+    const dir = S.v >= 0 ? 1 : -1;
+    if (W.inBuilding(nx + sin * 2.2 * dir, nz - cos * 2.2 * dir)) S.v = -S.v * 0.3; else { S.x = nx; S.z = nz; }
+    if (gas && !game.started) game.started = true;
+    if (game.started) game.t += dt;
+  } else S.v *= Math.max(0, 1 - 2 * dt);
+
+  const g = W.surfaceAt(S.x, S.z, S.h);
+  if (game.snap > 0) { S.h = g; game.snap -= dt; } else { const d = g - S.h; S.h += d > 0 ? Math.min(d, (8 + av * 0.7) * dt) : Math.max(d, -30 * dt); }
+  const hf = W.surfaceAt(S.x + sin * 1.35, S.z - cos * 1.35, S.h), hb = W.surfaceAt(S.x - sin * 1.35, S.z + cos * 1.35, S.h);
+  const hr = W.surfaceAt(S.x + cos * 0.8, S.z + sin * 0.8, S.h), hl = W.surfaceAt(S.x - cos * 0.8, S.z - sin * 0.8, S.h), k = Math.min(1, 10 * dt);
+  S.pitch += (clamp(Math.atan2(hf - hb, 2.7), -0.5, 0.5) - S.pitch) * k; S.roll += (clamp(Math.atan2(hr - hl, 1.6), -0.4, 0.4) - S.roll) * k;
+
+  // progress along the route
+  let bi = game.idx, bd = 1e9;
+  for (let i = Math.max(0, game.idx - 8); i <= Math.min(W.RN - 1, game.idx + 90); i++) { const d = Math.hypot(S.x - W.RX[i], S.z - W.RZ[i]); if (d < bd) { bd = d; bi = i; } }
+  game.idx = bi; const offRoute = bd > 45;
+  if (!game.finished) {
+    while (game.cp < W.cps.length - 1 && game.idx >= W.cps[game.cp] && !offRoute) game.cp++;
+    if (game.cp === W.cps.length - 1 && Math.hypot(S.x - W.RX[W.RN - 1], S.z - W.RZ[W.RN - 1]) < 25) finish();
+    showMsg(offRoute ? "OFF ROUTE — PRESS R" : !game.started ? (touch ? "GET TO WORK — HOLD GAS" : "GET TO WORK — PRESS W OR ↑") : "");
+  }
+
+  // car, camera
+  const c = W.car; c.position.set(S.x, S.h, S.z); c.rotation.set(S.pitch, -S.heading, -S.roll);
+  S.spin += S.v * dt / 0.34; for (const w of W.wheels) w.rotation.x = -S.spin; for (const p of W.steerers) p.rotation.y = -S.steer;
+  let dh = S.heading - game.camH; dh = Math.atan2(Math.sin(dh), Math.cos(dh)); game.camH += dh * Math.min(1, 4.5 * dt);
+  if (game.hood) { camera.position.set(S.x + sin * 0.2, S.h + 1.28, S.z - cos * 0.2); camera.rotation.set(S.pitch * 0.6, -S.heading, 0, "YXZ"); camera.fov = 75; }
+  else { const d = 7.5 + av * 0.07, cs = Math.sin(game.camH), cc = Math.cos(game.camH), cx = S.x - cs * d, cz = S.z + cc * d;
+    camera.position.set(cx, Math.max(S.h + 2.9, W.terrainAt(cx, cz) + 1.2), cz); camera.lookAt(S.x + sin * 4, S.h + 1.3, S.z - cos * 4); camera.fov = 62 + av * 0.25; }
+  camera.updateProjectionMatrix(); c.visible = !game.hood; W.sky.position.copy(camera.position);
+  const cpI = W.cps[Math.min(game.cp, W.cps.length - 1)]; W.beam.position.set(W.RX[cpI], W.RH[cpI] + 40, W.RZ[cpI]);
+  if (osc && actx) { osc.frequency.value = 42 + (av % 13) * 5 + av * 1.6; gain.gain.value = muted || game.finished ? 0 : 0.02 + Math.min(0.03, av * 0.001); }
+
+  // HUD
+  $("speed").firstChild.nodeValue = Math.round(av * 3.6); $("time").textContent = fmt(game.t);
+  const m = (W.RN - 1 - game.idx) * 8; $("left").textContent = (m >= 1000 ? (m / 1000).toFixed(1) + " KM" : Math.round(m) + " M") + " TO WORK";
+  $("cp").textContent = "CHECKPOINT " + game.cp + " / " + W.cps.length;
+  if (frameN++ % 2 === 0) drawMap();
+}
+function finish() {
+  game.finished = true; showMsg(""); const id = "best3d_" + W.RN, prev = parseFloat(store.get(id)), best = !(prev > 0) || game.t < prev;
+  if (best) store.set(id, String(game.t)); $("bigtime").textContent = fmt(game.t); $("best").textContent = best ? "New best time!" : "Best: " + fmt(prev); $("done").style.display = "flex";
+}
+function drawMap() {
+  const cv = $("map"), c = cv.getContext("2d"), Wd = cv.width, cx = Wd / 2, R = 260, sc = Wd / 2 / R, sin = Math.sin(S.heading), cos = Math.cos(S.heading);
+  const X = (x, z) => cx + ((x - S.x) * cos + (z - S.z) * sin) * sc, Y = (x, z) => cx + (-(x - S.x) * sin + (z - S.z) * cos) * sc;
+  c.fillStyle = "#2a3138"; c.fillRect(0, 0, Wd, Wd); c.lineCap = "round"; c.strokeStyle = "#8b949d";
+  const ci = Math.floor(S.x / W.HC), cj = Math.floor(S.z / W.HC), n = Math.ceil(R / W.HC);
+  for (let i = ci - n; i <= ci + n; i++) for (let j = cj - n; j <= cj + n; j++) { const a = W.segH.get(i * 100003 + j); if (!a) continue;
+    for (const s of a) { c.lineWidth = Math.max(2, s[4] * 2 * sc); c.beginPath(); c.moveTo(X(s[0], s[1]), Y(s[0], s[1])); c.lineTo(X(s[2], s[3]), Y(s[2], s[3])); c.stroke(); } }
+  c.strokeStyle = "#ffd23f"; c.lineWidth = 6; c.lineJoin = "round"; c.beginPath();
+  for (let i = Math.max(0, game.idx - 40), f = true; i <= Math.min(W.RN - 1, game.idx + 80); i++, f = false) { const x = X(W.RX[i], W.RZ[i]), y = Y(W.RX[i], W.RZ[i]); f ? c.moveTo(x, y) : c.lineTo(x, y); }
+  c.stroke();
+  const k = W.cps[Math.min(game.cp, W.cps.length - 1)]; let px = X(W.RX[k], W.RZ[k]), py = Y(W.RX[k], W.RZ[k]); const r = Math.hypot(px - cx, py - cx), mr = Wd / 2 - 16;
+  if (r > mr) { px = cx + (px - cx) * mr / r; py = cx + (py - cx) * mr / r; }
+  c.fillStyle = "#ff5a3c"; c.fillRect(px - 9, py - 9, 18, 18); c.strokeStyle = "#000"; c.lineWidth = 3; c.strokeRect(px - 9, py - 9, 18, 18);
+  c.fillStyle = "#fff"; c.beginPath(); c.moveTo(cx, cx - 17); c.lineTo(cx + 12, cx + 13); c.lineTo(cx, cx + 6); c.lineTo(cx - 12, cx + 13); c.closePath(); c.fill(); c.stroke();
+}
+function frame(now) {
+  if (dead) return; const dt = Math.min(0.05, (now - lastT) / 1000 || 0.016); lastT = now;
+  try { update(dt); renderer.render(W.scene, camera); } catch (e) { dead = true; console.error(e); showMsg("Something broke: " + (e.message || e) + " — reload the page."); return; }
+  requestAnimationFrame(frame);
+}
+
+const touch = "ontouchstart" in window || navigator.maxTouchPoints > 0;
+if (touch) document.body.classList.add("touch");
+document.querySelectorAll(".tb").forEach(b => { const k = b.dataset.k;
+  const off = () => { keys[k] = false; b.classList.remove("on"); };
+  b.addEventListener("pointerdown", e => { e.preventDefault(); if (!W) return; initAudio(); b.classList.add("on");
+    if (k === "KeyC") game.hood = !game.hood; else if (k === "KeyR") { if (!game.finished) placeOnRoute(game.idx); } else keys[k] = true; });
+  for (const ev of ["pointerup", "pointercancel", "pointerleave"]) b.addEventListener(ev, off);
+  b.addEventListener("contextmenu", e => e.preventDefault()); });
+addEventListener("keydown", e => {
+  if (!W || $("setup").style.display !== "none") return;
+  keys[e.code] = true; initAudio();
+  if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(e.code)) e.preventDefault();
+  if (e.code === "KeyC") game.hood = !game.hood;
+  if (e.code === "KeyP") { retro = !retro; resize(); }
+  if (e.code === "KeyM") muted = !muted;
+  if (e.code === "KeyR" && !game.finished) placeOnRoute(game.idx);
+});
+addEventListener("keyup", e => { keys[e.code] = false; });
+addEventListener("blur", () => { for (const k in keys) keys[k] = false; });
+addEventListener("resize", resize);
+$("again").addEventListener("click", resetRun);
+
+$("form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const home = $("home").value.trim(), work = $("work").value.trim(), ck = "v1|" + home.toLowerCase() + "|" + work.toLowerCase();
+  $("err").textContent = ""; $("go").disabled = true;
+  if (touch) try { document.documentElement.requestFullscreen().then(() => screen.orientation.lock("landscape")).catch(() => {}); } catch (e2) {}
+  try {
+    if (typeof THREE === "undefined") throw new Error("The 3D engine did not load. Check your internet connection and reload.");
+    let data = $("fresh").checked ? null : await cacheGet(ck);
+    if (!data) {
+      await stage("Finding the two places…");
+      const a = await geocode(home), b = await geocode(work);
+      await stage("Getting the driving route…");
+      const route = await getRoute(a, b);
+      await stage("Downloading roads and buildings (the slow part)…");
+      const ways = await getOSM(route);
+      await stage("Downloading the hills…");
+      const tiles = await getTiles(route);
+      data = { route, ways, tiles };
+      if (Object.keys(tiles).length) await cacheSet(ck, data);
+    }
+    await stage("Shaping the hills…");
+    await buildWorld(data);
+    if (!renderer) {
+      renderer = new THREE.WebGLRenderer({ canvas: $("view"), antialias: false });
+      camera = new THREE.PerspectiveCamera(62, 1, 0.4, 6000);
+      requestAnimationFrame(frame);
+    }
+    resize(); resetRun();
+    store.set("home", home); store.set("work", work);
+    for (const id of ["hud", "map", "keys"]) $(id).style.display = "block";
+    if (touch) $("touch").style.display = "block";
+    $("setup").style.display = "none"; $("stage").textContent = "";
+    if (!W.hasElev) showMsg("Hills could not be downloaded — the world is flat this time.");
+  } catch (err) { console.error(err); $("err").textContent = err.message || String(err); $("stage").textContent = ""; }
+  $("go").disabled = false;
+});
+</script>
+</body>
+</html>
