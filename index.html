@@ -82,12 +82,12 @@
   <button class="tb sm" data-k="KeyC" style="right:132px;bottom:124px">CAM</button>
 </div>
 <div id="rot">Turn your phone sideways to drive</div>
-<div class="credit">Map data © OpenStreetMap contributors · Terrain: Mapzen / AWS Terrain Tiles</div>
+<div class="credit">© OpenStreetMap contributors · OpenFreeMap © OpenMapTiles · Terrain: Mapzen / AWS Terrain Tiles</div>
 
 <div id="setup">
   <form class="card" id="form">
     <h1>COMMUTE DRIVE 3D</h1>
-    <p>Your real route, rebuilt as a low-poly game world from open map data. No account or key needed. The first load downloads the map and can take up to a minute; after that it starts from a saved copy in this browser.</p>
+    <p>Your real route, rebuilt as a low-poly game world from open map data. No account or key needed. The first load downloads the map and takes a few seconds; after that it starts from a saved copy in this browser.</p>
     <label for="home">Home</label>
     <input id="home" type="text" placeholder="Place name, address, or lat, lon" required>
     <label for="work">Work</label>
@@ -139,54 +139,99 @@ async function jget(url, opt) { const r = await fetch(url, opt); if (!r.ok) thro
 async function geocode(q) {
   const m = q.match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
   if (m) return { lat: +m[1], lon: +m[2] };
-  let d;
-  try { d = await jget("https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&accept-language=en&q=" + encodeURIComponent(q)); }
-  catch (e) { throw new Error("The address search service did not answer (" + e.message + "). Try again in a minute."); }
-  if (!d.length) throw new Error('Could not find "' + q + '". Try a simpler name, or paste coordinates like 31.817, 35.110.');
-  return { lat: +d[0].lat, lon: +d[0].lon };
+  let d = null, err;
+  try { d = await jget("https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&accept-language=en&q=" + encodeURIComponent(q)); if (d.length) return { lat: +d[0].lat, lon: +d[0].lon }; }
+  catch (e) { err = e; }
+  try { const f = (await jget("https://photon.komoot.io/api/?limit=1&lang=en&q=" + encodeURIComponent(q))).features; if (f.length) return { lat: f[0].geometry.coordinates[1], lon: f[0].geometry.coordinates[0] }; d = d || []; }
+  catch (e) { err = err || e; }
+  if (!d) throw new Error("The address search services did not answer (" + err.message + "). Try again in a minute, or paste coordinates like 31.817, 35.110.");
+  throw new Error('Could not find "' + q + '". Try a simpler name, or paste coordinates like 31.817, 35.110.');
 }
 async function getRoute(a, b) {
-  let d;
-  try { d = await jget(`https://router.project-osrm.org/route/v1/driving/${a.lon},${a.lat};${b.lon},${b.lat}?overview=full&geometries=geojson`); }
-  catch (e) { throw new Error("The routing service did not answer (" + e.message + "). Try again in a minute."); }
-  if (d.code !== "Ok" || !d.routes || !d.routes.length) throw new Error("No driving route found between those two places.");
-  return d.routes[0].geometry.coordinates;
+  let err, none = false;
+  for (const base of ["https://router.project-osrm.org/route/v1/driving/", "https://routing.openstreetmap.de/routed-car/route/v1/driving/"]) {
+    try { const d = await jget(`${base}${a.lon},${a.lat};${b.lon},${b.lat}?overview=full&geometries=geojson`);
+      if (d.code === "Ok" && d.routes && d.routes.length) return d.routes[0].geometry.coordinates; none = true; } catch (e) { err = e; } }
+  if (none) throw new Error("No driving route found between those two places.");
+  throw new Error("The routing services did not answer (" + err.message + "). Try again in a minute.");
 }
-function osmBoxes(coords) {
-  // boxes of about 550 m along the route, at most 3 side by side, each downloaded on its own
-  const cells = new Map(), LA = 0.005, LO = 0.006, out = [];
-  for (const c of coords) for (const dy of [-0.0028, 0, 0.0028]) for (const dx of [-0.0033, 0, 0.0033]) {
-    const j = Math.floor((c[1] + dy) / LA), i = Math.floor((c[0] + dx) / LO); let s = cells.get(j); if (!s) cells.set(j, s = new Set()); s.add(i); }
-  for (const [j, s] of cells) { const a = [...s].sort((x, y) => x - y);
-    for (let k = 0; k < a.length;) { let e = k; while (e + 1 < a.length && a[e + 1] === a[e] + 1 && e - k < 2) e++;
-      out.push(`(${(j * LA).toFixed(4)},${(a[k] * LO).toFixed(4)},${((j + 1) * LA).toFixed(4)},${((a[e] + 1) * LO).toFixed(4)})`); k = e + 1; } }
-  return out;
+/* roads and buildings come from OpenFreeMap vector tiles (fast static files), decoded here */
+function readTile(u8) {
+  let p = 0; const layers = {}, td = new TextDecoder(), dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  const vi = () => { let r = 0, m = 1, b; do { b = u8[p++]; r += (b & 127) * m; m *= 128; } while (b & 128); return r; };
+  const skip = w => { if (w === 0) vi(); else if (w === 1) p += 8; else if (w === 2) { const l = vi(); p += l; } else if (w === 5) p += 4; else throw new Error("bad tile"); };
+  const str = () => { const l = vi(), t = td.decode(u8.subarray(p, p + l)); p += l; return t; };
+  while (p < u8.length) { const t = vi(); if (t >> 3 !== 3 || (t & 7) !== 2) { skip(t & 7); continue; }
+    const end = vi() + p, L = { name: "", keys: [], vals: [], feats: [], extent: 4096 };
+    while (p < end) { const t2 = vi(), f = t2 >> 3, w = t2 & 7;
+      if (f === 1) L.name = str(); else if (f === 2) { const l = vi(); L.feats.push([p, p + l]); p += l; } else if (f === 3) L.keys.push(str());
+      else if (f === 4) { const e2 = vi() + p; let v = null;
+        while (p < e2) { const t3 = vi(), f3 = t3 >> 3;
+          if (f3 === 1) v = str(); else if (f3 === 2) { v = dv.getFloat32(p, true); p += 4; } else if (f3 === 3) { v = dv.getFloat64(p, true); p += 8; }
+          else if (f3 === 4 || f3 === 5) v = vi(); else if (f3 === 6) { const z = vi(); v = z % 2 ? -(z + 1) / 2 : z / 2; } else if (f3 === 7) v = !!vi(); else skip(t3 & 7); }
+        L.vals.push(v); }
+      else if (f === 5) L.extent = vi(); else skip(w); }
+    layers[L.name] = L; }
+  const zz = v => (v % 2 ? -(v + 1) / 2 : v / 2);
+  const feat = (L, ab) => { p = ab[0]; const o = { type: 0, props: {}, geom: [] }, tags = [], g = [];
+    while (p < ab[1]) { const t = vi(), f = t >> 3, w = t & 7;
+      if (f === 2 && w === 2) { const e = vi() + p; while (p < e) tags.push(vi()); } else if (f === 3) o.type = vi();
+      else if (f === 4 && w === 2) { const e = vi() + p; while (p < e) g.push(vi()); } else skip(w); }
+    for (let i = 0; i + 1 < tags.length; i += 2) o.props[L.keys[tags[i]]] = L.vals[tags[i + 1]];
+    let x = 0, y = 0, ring = null;
+    for (let i = 0; i < g.length;) { const c = g[i++], id = c & 7, n = c >> 3;
+      if (id === 1) for (let k = 0; k < n; k++) { x += zz(g[i++]); y += zz(g[i++]); ring = [x, y]; o.geom.push(ring); }
+      else if (id === 2) for (let k = 0; k < n; k++) { x += zz(g[i++]); y += zz(g[i++]); ring.push(x, y); }
+      else if (id === 7 && ring) ring.push(ring[0], ring[1]); }
+    return o; };
+  return { layers, feat };
 }
-async function getOSM(coords, ck) {
-  const boxes = osmBoxes(coords), part = (await cacheGet(ck + "|part")) || {};
-  const eps = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter", "https://overpass.private.coffee/api/interpreter"];
-  const hw = '[highway~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|service)(_link)?$"]';
-  let done = boxes.filter(b => part[b]).length, next = 0;
-  const show = () => { $("stage").textContent = `Downloading roads and buildings… part ${done} of ${boxes.length} (keeps what it already has if it stops)`; };
-  const one = async (bb, n) => {
-    const q = `[out:json][timeout:40];(way${hw}${bb};way[building]${bb};);out geom qt;`; let err;
-    for (let a = 0; a < 6; a++) { const c = new AbortController(), t = setTimeout(() => c.abort(), 45000);
-      try { const d = await jget(eps[(n + a) % eps.length], { method: "POST", body: "data=" + encodeURIComponent(q), headers: { "Content-Type": "application/x-www-form-urlencoded" }, signal: c.signal });
-        if (!d.elements || (d.remark && /error|timed out/i.test(d.remark))) throw new Error(d.remark || "bad answer");
-        part[bb] = d.elements.filter(e => e.type === "way" && e.geometry && e.tags).map(e => {
-          const g = new Float64Array(e.geometry.length * 2); e.geometry.forEach((p, i) => { g[2 * i] = p.lat; g[2 * i + 1] = p.lon; });
-          return { id: e.id ?? g[0] + "," + g[1] + "," + g.length, t: e.tags, g }; });
-        await cacheSet(ck + "|part", part); return;
-      } catch (e) { err = e.name === "AbortError" ? new Error("timed out") : e; await new Promise(r => setTimeout(r, 1500)); } finally { clearTimeout(t); } }
-    throw err;
-  };
-  const worker = async () => { while (next < boxes.length) { const n = next++, bb = boxes[n]; if (part[bb]) continue; await one(bb, n); done++; show(); } };
-  show();
-  try { await Promise.all([worker(), worker()]); }
-  catch (e) { throw new Error(`The map download stopped at part ${done} of ${boxes.length} (${e.message}). Tap Start driving again — it continues from where it stopped.`); }
-  const seen = new Set(), ways = [];
-  for (const b of boxes) for (const w of part[b]) if (!seen.has(w.id)) { seen.add(w.id); ways.push(w); }
-  if (!ways.length) throw new Error("The map service returned no roads for this route.");
+function clipLine(r, E) {       // cut a line at the tile edge so pieces in neighbouring tiles meet exactly
+  const out = []; let cur = null;
+  for (let i = 0; i + 3 < r.length; i += 2) { const x0 = r[i], y0 = r[i + 1], dx = r[i + 2] - x0, dy = r[i + 3] - y0; let t0 = 0, t1 = 1, ok = true;
+    for (const [pp, q] of [[-dx, x0], [dx, E - x0], [-dy, y0], [dy, E - y0]]) {
+      if (pp === 0) { if (q < 0) { ok = false; break; } } else { const t = q / pp; if (pp < 0) { if (t > t1) { ok = false; break; } if (t > t0) t0 = t; } else { if (t < t0) { ok = false; break; } if (t < t1) t1 = t; } } }
+    if (!ok) { cur = null; continue; }
+    if (!cur || t0 > 0) { cur = [x0 + dx * t0, y0 + dy * t0]; out.push(cur); }
+    cur.push(x0 + dx * t1, y0 + dy * t1); if (t1 < 1) cur = null; }
+  return out.filter(c => c.length >= 4);
+}
+async function getMap(coords) {
+  const ZM = 14, N = 1 << ZM, near = new Set(), need = new Map(), ways = [];
+  const ty = lat => Math.floor((1 - Math.asinh(Math.tan(lat * D2R)) / Math.PI) / 2 * N);
+  for (const c of coords) { near.add(Math.floor(c[1] / 0.004) + "|" + Math.floor(c[0] / 0.0047));
+    for (const dy of [-0.004, 0, 0.004]) for (const dx of [-0.0047, 0, 0.0047]) { const x = Math.floor((c[0] + dx + 180) / 360 * N), y = ty(c[1] + dy); need.set(x + "/" + y, [x, y]); } }
+  const isNear = (lat, lon) => { const j = Math.floor(lat / 0.004), i = Math.floor(lon / 0.0047);
+    for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) if (near.has((j + a) + "|" + (i + b))) return true; return false; };
+  let tpl;
+  try { tpl = (await jget("https://tiles.openfreemap.org/planet")).tiles[0]; } catch (e) { throw new Error("The map service did not answer (" + e.message + "). Try again in a minute."); }
+  const ROAD = { motorway: 1, trunk: 1, primary: 1, secondary: 1, tertiary: 1, minor: 1, service: 1 }, list = [...need.values()]; let next = 0, done = 0;
+  const decode = (u8, tx, tyy) => { const { layers, feat } = readTile(u8);
+    const ll = (L, px, py) => [Math.atan(Math.sinh(Math.PI * (1 - 2 * (tyy + py / L.extent) / N))) / D2R, (tx + px / L.extent) / N * 360 - 180];
+    const T = layers.transportation, B = layers.building;
+    if (T) for (const ab of T.feats) { const f = feat(T, ab), pr = f.props; if (f.type !== 2 || !ROAD[pr.class] || pr.brunnel === "ford") continue;
+      if (pr.class === "service" && (pr.service === "parking_aisle" || pr.service === "driveway")) continue;
+      const t = { highway: (pr.class === "minor" ? "residential" : pr.class) + (pr.ramp ? "_link" : "") };
+      if (pr.oneway) t.oneway = "yes"; if (pr.brunnel === "bridge") t.bridge = "yes"; if (pr.brunnel === "tunnel") t.tunnel = "yes";
+      for (const line of f.geom) for (const c of clipLine(line, T.extent)) { const g = new Float64Array(c.length); let ok = false;
+        for (let i = 0; i < c.length; i += 2) { const q = ll(T, c[i], c[i + 1]); g[i] = q[0]; g[i + 1] = q[1]; if (!ok && isNear(q[0], q[1])) ok = true; }
+        if (ok) ways.push({ t, g }); } }
+    if (B) for (const ab of B.feats) { const f = feat(B, ab); if (f.type !== 3) continue;
+      for (const r of f.geom) { const n = r.length / 2; if (n < 4) continue; let ar = 0, cx = 0, cy = 0;
+        for (let i = 0; i < n - 1; i++) { ar += r[2 * i] * r[2 * i + 3] - r[2 * i + 2] * r[2 * i + 1]; cx += r[2 * i]; cy += r[2 * i + 1]; }
+        cx /= n - 1; cy /= n - 1; if (ar <= 0 || cx < 0 || cy < 0 || cx >= B.extent || cy >= B.extent) continue;
+        const q = ll(B, cx, cy); if (!isNear(q[0], q[1])) continue;
+        const g = new Float64Array(r.length); for (let i = 0; i < r.length; i += 2) { const v = ll(B, r[i], r[i + 1]); g[i] = v[0]; g[i + 1] = v[1]; }
+        ways.push({ t: { building: "yes", height: f.props.render_height }, g }); } } };
+  const one = async ([x, y]) => { let err;
+    for (let a = 0; a < 4; a++) { try { const r = await fetch(tpl.replace("{z}", ZM).replace("{x}", x).replace("{y}", y));
+        if (r.status === 204 || r.status === 404) return; if (!r.ok) throw new Error("HTTP " + r.status);
+        decode(new Uint8Array(await r.arrayBuffer()), x, y); return; } catch (e) { err = e; await new Promise(r => setTimeout(r, 800)); } }
+    throw err; };
+  const worker = async () => { while (next < list.length) { await one(list[next++]); $("stage").textContent = `Downloading roads and buildings… ${++done} of ${list.length}`; } };
+  try { await Promise.all([worker(), worker(), worker(), worker(), worker()]); }
+  catch (e) { throw new Error("The map download failed (" + e.message + "). Check your connection and try again."); }
+  if (!ways.some(w => w.t.highway)) throw new Error("The map service returned no roads for this route.");
   return ways;
 }
 const ZT = 13, lon2t = lon => (lon + 180) / 360 * (1 << ZT),
@@ -213,7 +258,7 @@ async function getTiles(coords) {
 
 /* ================= world ================= */
 let W = null;      // everything about the built world
-const CLS = { motorway: 5, trunk: 5, primary: 4, secondary: 3, tertiary: 2, unclassified: 1, residential: 1, living_street: 1, service: 0 };
+const CLS = { minor: 1, motorway: 5, trunk: 5, primary: 4, secondary: 3, tertiary: 2, unclassified: 1, residential: 1, living_street: 1, service: 0 };
 
 function resample(P, step) {
   const X = [P[0]], Z = [P[1]], S = [0]; let s = 0;
@@ -322,11 +367,13 @@ async function buildWorld(data) {
   }
   // bridges and tunnels: straight-line height between the points where they meet the ground
   const solve = (list, hfn) => {
-    const nodes = new Map(), N = k => { let o = nodes.get(k); if (!o) { o = { cnt: 0, h: 0, nb: [] }; nodes.set(k, o); } return o; };
-    for (const r of list) { const a = N(r.k0), b = N(r.k1), L = Math.max(r.rs.L, 1), m = r.rs.X.length - 1;
-      a.cnt++; b.cnt++; a.nb.push([b, L]); b.nb.push([a, L]); a.x = r.rs.X[0]; a.z = r.rs.Z[0]; b.x = r.rs.X[m]; b.z = r.rs.Z[m]; r.na = a; r.nb = b; }
-    for (const o of nodes.values()) o.h = hfn(o.x, o.z);
-    for (let it = 0; it < 600; it++) for (const o of nodes.values()) { if (o.cnt === 1) continue;
+    const cells = new Map(), all = [], N = (x, z) => { const ci = Math.floor(x / 3), cj = Math.floor(z / 3);   // ends within 1.6 m are the same point
+      for (let i = ci - 1; i <= ci + 1; i++) for (let j = cj - 1; j <= cj + 1; j++) { const a = cells.get(i * 100003 + j); if (a) for (const o of a) if (Math.hypot(o.x - x, o.z - z) < 1.6) return o; }
+      const o = { x, z, cnt: 0, h: 0, nb: [] }, k = ci * 100003 + cj; let a = cells.get(k); if (!a) cells.set(k, a = []); a.push(o); all.push(o); return o; };
+    for (const r of list) { const m = r.rs.X.length - 1, a = N(r.rs.X[0], r.rs.Z[0]), b = N(r.rs.X[m], r.rs.Z[m]), L = Math.max(r.rs.L, 1);
+      a.cnt++; b.cnt++; a.nb.push([b, L]); b.nb.push([a, L]); r.na = a; r.nb = b; }
+    for (const o of all) o.h = hfn(o.x, o.z);
+    for (let it = 0; it < 600; it++) for (const o of all) { if (o.cnt === 1) continue;
       let sw = 0, sh = 0; for (const [q, L] of o.nb) { sw += 1 / L; sh += q.h / L; } o.h = sh / sw; }
     for (const r of list) r.prof = r.rs.S.map(s => lerp(r.na.h, r.nb.h, s / Math.max(r.rs.L, 1e-3)));
   };
@@ -649,7 +696,7 @@ $("again").addEventListener("click", resetRun);
 
 $("form").addEventListener("submit", async e => {
   e.preventDefault();
-  const home = $("home").value.trim(), work = $("work").value.trim(), ck = "v1|" + home.toLowerCase() + "|" + work.toLowerCase();
+  const home = $("home").value.trim(), work = $("work").value.trim(), ck = "v2|" + home.toLowerCase() + "|" + work.toLowerCase();
   $("err").textContent = ""; $("go").disabled = true;
   try { if (navigator.wakeLock) navigator.wakeLock.request("screen").catch(() => {}); } catch (e2) {}
   if (touch) try { document.documentElement.requestFullscreen().then(() => screen.orientation.lock("landscape")).catch(() => {}); } catch (e2) {}
@@ -661,12 +708,12 @@ $("form").addEventListener("submit", async e => {
       const a = await geocode(home), b = await geocode(work);
       await stage("Getting the driving route…");
       const route = await getRoute(a, b);
-      await stage("Downloading roads and buildings (the slow part)…");
-      const ways = await getOSM(route, ck);
+      await stage("Downloading roads and buildings…");
+      const ways = await getMap(route);
       await stage("Downloading the hills…");
       const tiles = await getTiles(route);
       data = { route, ways, tiles };
-      if (Object.keys(tiles).length) { await cacheSet(ck, data); await cacheSet(ck + "|part", null); }
+      if (Object.keys(tiles).length) await cacheSet(ck, data);
     }
     await stage("Shaping the hills…");
     await buildWorld(data);
