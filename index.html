@@ -566,7 +566,7 @@ async function buildWorld(data) {
   const shadow = new T.Mesh(new T.PlaneGeometry(2.3, 4.9), new T.MeshBasicMaterial({ color: 0, transparent: true, opacity: 0.35, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -8, polygonOffsetUnits: -16 }));
   shadow.rotation.x = -Math.PI / 2; shadow.position.y = 0.06; car.add(shadow); car.rotation.order = "YXZ"; scene.add(car);
 
-  W = { scene, sky, car, wheels, steerers, beam, RX, RZ, RH, RN, cps, terrainAt, surfaceAt, roadDist, inBuilding, segH, strH, proj, hkey, HC, hasElev,
+  W = { RL: rs.L, scene, sky, car, wheels, steerers, beam, RX, RZ, RH, RN, cps, terrainAt, surfaceAt, roadDist, inBuilding, segH, strH, proj, hkey, HC, hasElev,
     stats: { roads: roads.length, buildings: blds.filter(b => !b.skip).length, tunnels: roads.filter(r => r.tunnel).length, bridges: roads.filter(r => r.bridge).length } };
 }
 
@@ -643,7 +643,7 @@ function update(dt) {
 
   // HUD
   $("speed").firstChild.nodeValue = Math.round(av * 3.6); $("time").textContent = fmt(game.t);
-  const m = (W.RN - 1 - game.idx) * 8; $("left").textContent = (m >= 1000 ? (m / 1000).toFixed(1) + " KM" : Math.round(m) + " M") + " TO WORK";
+  const m = W.RL * (1 - game.idx / (W.RN - 1)); $("left").textContent = (m >= 1000 ? (m / 1000).toFixed(1) + " KM" : Math.round(m) + " M") + " TO WORK";
   $("cp").textContent = "CHECKPOINT " + game.cp + " / " + W.cps.length;
   if (frameN++ % 2 === 0) drawMap();
 }
