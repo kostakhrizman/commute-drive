@@ -152,31 +152,42 @@ async function getRoute(a, b) {
   if (d.code !== "Ok" || !d.routes || !d.routes.length) throw new Error("No driving route found between those two places.");
   return d.routes[0].geometry.coordinates;
 }
-function osmQuery(coords) {
-  // boxes of about 550 m along the route, merged into runs, so the map server can answer from its index
-  const cells = new Map(), LA = 0.005, LO = 0.006;
+function osmBoxes(coords) {
+  // boxes of about 550 m along the route, at most 3 side by side, each downloaded on its own
+  const cells = new Map(), LA = 0.005, LO = 0.006, out = [];
   for (const c of coords) for (const dy of [-0.0028, 0, 0.0028]) for (const dx of [-0.0033, 0, 0.0033]) {
     const j = Math.floor((c[1] + dy) / LA), i = Math.floor((c[0] + dx) / LO); let s = cells.get(j); if (!s) cells.set(j, s = new Set()); s.add(i); }
-  const hw = '[highway~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|service)(_link)?$"]'; let body = "";
   for (const [j, s] of cells) { const a = [...s].sort((x, y) => x - y);
-    for (let k = 0; k < a.length;) { let e = k; while (e + 1 < a.length && a[e + 1] === a[e] + 1) e++;
-      const bb = `(${(j * LA).toFixed(4)},${(a[k] * LO).toFixed(4)},${((j + 1) * LA).toFixed(4)},${((a[e] + 1) * LO).toFixed(4)})`;
-      body += `way${hw}${bb};way[building]${bb};`; k = e + 1; } }
-  return `[out:json][timeout:90];(${body});out geom qt;`;
+    for (let k = 0; k < a.length;) { let e = k; while (e + 1 < a.length && a[e + 1] === a[e] + 1 && e - k < 2) e++;
+      out.push(`(${(j * LA).toFixed(4)},${(a[k] * LO).toFixed(4)},${((j + 1) * LA).toFixed(4)},${((a[e] + 1) * LO).toFixed(4)})`); k = e + 1; } }
+  return out;
 }
-async function getOSM(coords) {
-  const q = osmQuery(coords);
-  const ask = async ep => { const c = new AbortController(), t = setTimeout(() => c.abort(), 100000);
-    try { const d = await jget(ep, { method: "POST", body: "data=" + encodeURIComponent(q), headers: { "Content-Type": "application/x-www-form-urlencoded" }, signal: c.signal });
-      if (!d.elements || !d.elements.length) throw new Error("empty answer"); return d.elements; } finally { clearTimeout(t); } };
-  let els;
-  try { els = await Promise.any(["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter", "https://overpass.private.coffee/api/interpreter"].map(ask)); }
-  catch (e) { throw new Error("The map data service is busy or not answering (" + ((e.errors || [e]).map(x => x.message).join("; ")) + "). Wait a minute and try again."); }
-  return els.filter(e => e.type === "way" && e.geometry && e.tags).map(e => {
-    const g = new Float64Array(e.geometry.length * 2);
-    e.geometry.forEach((p, i) => { g[2 * i] = p.lat; g[2 * i + 1] = p.lon; });
-    return { t: e.tags, g };
-  });
+async function getOSM(coords, ck) {
+  const boxes = osmBoxes(coords), part = (await cacheGet(ck + "|part")) || {};
+  const eps = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter", "https://overpass.private.coffee/api/interpreter"];
+  const hw = '[highway~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|service)(_link)?$"]';
+  let done = boxes.filter(b => part[b]).length, next = 0;
+  const show = () => { $("stage").textContent = `Downloading roads and buildings… part ${done} of ${boxes.length} (keeps what it already has if it stops)`; };
+  const one = async (bb, n) => {
+    const q = `[out:json][timeout:40];(way${hw}${bb};way[building]${bb};);out geom qt;`; let err;
+    for (let a = 0; a < 6; a++) { const c = new AbortController(), t = setTimeout(() => c.abort(), 45000);
+      try { const d = await jget(eps[(n + a) % eps.length], { method: "POST", body: "data=" + encodeURIComponent(q), headers: { "Content-Type": "application/x-www-form-urlencoded" }, signal: c.signal });
+        if (!d.elements || (d.remark && /error|timed out/i.test(d.remark))) throw new Error(d.remark || "bad answer");
+        part[bb] = d.elements.filter(e => e.type === "way" && e.geometry && e.tags).map(e => {
+          const g = new Float64Array(e.geometry.length * 2); e.geometry.forEach((p, i) => { g[2 * i] = p.lat; g[2 * i + 1] = p.lon; });
+          return { id: e.id ?? g[0] + "," + g[1] + "," + g.length, t: e.tags, g }; });
+        await cacheSet(ck + "|part", part); return;
+      } catch (e) { err = e.name === "AbortError" ? new Error("timed out") : e; await new Promise(r => setTimeout(r, 1500)); } finally { clearTimeout(t); } }
+    throw err;
+  };
+  const worker = async () => { while (next < boxes.length) { const n = next++, bb = boxes[n]; if (part[bb]) continue; await one(bb, n); done++; show(); } };
+  show();
+  try { await Promise.all([worker(), worker()]); }
+  catch (e) { throw new Error(`The map download stopped at part ${done} of ${boxes.length} (${e.message}). Tap Start driving again — it continues from where it stopped.`); }
+  const seen = new Set(), ways = [];
+  for (const b of boxes) for (const w of part[b]) if (!seen.has(w.id)) { seen.add(w.id); ways.push(w); }
+  if (!ways.length) throw new Error("The map service returned no roads for this route.");
+  return ways;
 }
 const ZT = 13, lon2t = lon => (lon + 180) / 360 * (1 << ZT),
   lat2t = lat => (1 - Math.asinh(Math.tan(lat * D2R)) / Math.PI) / 2 * (1 << ZT);
@@ -640,6 +651,7 @@ $("form").addEventListener("submit", async e => {
   e.preventDefault();
   const home = $("home").value.trim(), work = $("work").value.trim(), ck = "v1|" + home.toLowerCase() + "|" + work.toLowerCase();
   $("err").textContent = ""; $("go").disabled = true;
+  try { if (navigator.wakeLock) navigator.wakeLock.request("screen").catch(() => {}); } catch (e2) {}
   if (touch) try { document.documentElement.requestFullscreen().then(() => screen.orientation.lock("landscape")).catch(() => {}); } catch (e2) {}
   try {
     if (typeof THREE === "undefined") throw new Error("The 3D engine did not load. Check your internet connection and reload.");
@@ -650,11 +662,11 @@ $("form").addEventListener("submit", async e => {
       await stage("Getting the driving route…");
       const route = await getRoute(a, b);
       await stage("Downloading roads and buildings (the slow part)…");
-      const ways = await getOSM(route);
+      const ways = await getOSM(route, ck);
       await stage("Downloading the hills…");
       const tiles = await getTiles(route);
       data = { route, ways, tiles };
-      if (Object.keys(tiles).length) await cacheSet(ck, data);
+      if (Object.keys(tiles).length) { await cacheSet(ck, data); await cacheSet(ck + "|part", null); }
     }
     await stage("Shaping the hills…");
     await buildWorld(data);
