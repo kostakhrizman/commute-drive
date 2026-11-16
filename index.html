@@ -56,7 +56,7 @@
   body.touch #map { top: 12px; left: 12px; bottom: auto; width: 120px; height: 120px; }
   body.touch #msg { bottom: auto; top: 24%; font-size: 22px; }
   body.touch #hud { top: 8px; right: 12px; } body.touch #time { font-size: 26px; } body.touch #speed { font-size: 36px; }
-  body.touch #left { font-size: 16px; } body.touch #cp { font-size: 13px; } body.touch .credit { display: none; }
+  body.touch #left { font-size: 16px; } body.touch #cp { font-size: 13px; } body.touch .credit { display: none; } body.touch #verc { left: 50%; transform: translateX(-50%); }
   @media (orientation: portrait) { body.touch #rot { display: flex; } }
   #rot { display: none; position: absolute; inset: 0; z-index: 20; background: #0d0f12; align-items: center; justify-content: center;
     font: 22px system-ui, sans-serif; text-align: center; padding: 30px; }
@@ -82,11 +82,12 @@
   <button class="tb sm" data-k="KeyC" style="right:132px;bottom:124px">CAM</button>
 </div>
 <div id="rot">Turn your phone sideways to drive</div>
+<div class="ver" id="verc" style="position:absolute;left:8px;bottom:4px;font:11px system-ui,sans-serif;color:#dfe5ea;opacity:.8;text-shadow:0 0 3px #000"></div>
 <div class="credit">© OpenStreetMap contributors · OpenFreeMap © OpenMapTiles · Terrain: Mapzen / AWS Terrain Tiles</div>
 
 <div id="setup">
   <form class="card" id="form">
-    <h1>COMMUTE DRIVE 3D</h1>
+    <h1>COMMUTE DRIVE 3D <span class="ver" style="font:13px system-ui,sans-serif;color:#9fd6ff;letter-spacing:0;vertical-align:middle"></span></h1>
     <p>Your real route, rebuilt as a low-poly game world from open map data. No account or key needed. The first load downloads the map and takes a few seconds; after that it starts from a saved copy in this browser.</p>
     <label for="home">Home</label>
     <input id="home" type="text" placeholder="Place name, address, or lat, lon" required>
@@ -114,7 +115,10 @@ const store = {
   get(k) { try { return localStorage.getItem("cd_" + k) || ""; } catch (e) { return ""; } },
   set(k, v) { try { localStorage.setItem("cd_" + k, v); } catch (e) {} }
 };
-for (const k of ["home", "work"]) $(k).value = store.get(k);
+const VERSION = "1.4";   // raise this with every update
+const DEFAULTS = { home: "Ma'ale HaHamisha, Israel", work: "Hebrew University Givat Ram, Jerusalem" };
+for (const k of ["home", "work"]) $(k).value = store.get(k) || DEFAULTS[k];
+for (const e of document.querySelectorAll(".ver")) e.textContent = "v" + VERSION;
 
 const RE = 6371000, D2R = Math.PI / 180;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v)), lerp = (a, b, t) => a + (b - a) * t;
